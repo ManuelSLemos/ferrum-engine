@@ -9,6 +9,8 @@ pub struct Token {
     pub token_id: i32,
     pub text: String,
     pub is_eos: bool,
+    /// Set on the final token of a request; indicates why generation stopped.
+    pub stop_reason: Option<StopReason>,
 }
 
 /// Stop reason when generation ends.
@@ -40,6 +42,10 @@ pub struct InferenceRequest {
     pub kv_block_ids: Vec<usize>,
     pub response_tx: mpsc::UnboundedSender<Token>,
     pub stop_reason: Option<StopReason>,
+    /// Sampling temperature (0 = greedy, >0 = stochastic).
+    pub temperature: f32,
+    /// Top-p nucleus sampling threshold (1.0 = disabled).
+    pub top_p: f32,
 }
 
 impl InferenceRequest {
@@ -47,6 +53,8 @@ impl InferenceRequest {
         id: u64,
         prompt_tokens: Vec<i32>,
         max_new_tokens: usize,
+        temperature: f32,
+        top_p: f32,
         response_tx: mpsc::UnboundedSender<Token>,
     ) -> Self {
         Self {
@@ -59,6 +67,8 @@ impl InferenceRequest {
             kv_block_ids: Vec::new(),
             response_tx,
             stop_reason: None,
+            temperature,
+            top_p,
         }
     }
 

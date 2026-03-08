@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::engine::InferenceEngine;
-use crate::scheduler::{InferenceRequest, Token};
+use crate::scheduler::{InferenceRequest, StopReason, Token};
 
 use super::types::*;
 
@@ -33,14 +33,22 @@ async fn health(State(engine): State<Arc<InferenceEngine>>) -> Json<HealthRespon
     })
 }
 
-async fn models(State(_engine): State<Arc<InferenceEngine>>) -> Json<ModelsResponse> {
+async fn models(State(engine): State<Arc<InferenceEngine>>) -> Json<ModelsResponse> {
     Json(ModelsResponse {
         object: "list".to_string(),
         data: vec![ModelInfo {
-            id: "default".to_string(),
+            id: engine.model_name().to_string(),
             object: "model".to_string(),
         }],
     })
+}
+
+fn finish_reason_str(reason: &StopReason) -> &'static str {
+    match reason {
+        StopReason::Eos => "stop",
+        StopReason::Length => "length",
+        StopReason::Preempt => "stop",
+    }
 }
 
 async fn chat_completions(
@@ -76,7 +84,6 @@ async fn chat_completions(
 
     // Tokenize using model's vocabulary
     let prompt_tokens: Vec<i32> = engine.tokenize(&prompt).unwrap_or_else(|_| {
-        // Fallback if tokenize fails
         if prompt.is_empty() {
             vec![0]
         } else {
@@ -85,10 +92,12 @@ async fn chat_completions(
     });
 
     let max_tokens = req.max_tokens.unwrap_or(256) as usize;
+    let temperature = req.temperature.unwrap_or(1.0).max(0.0);
+    let top_p = req.top_p.unwrap_or(1.0).clamp(0.0, 1.0);
     let prompt_tokens_len = prompt_tokens.len();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Token>();
 
-    let inference_req = InferenceRequest::new(req_id, prompt_tokens, max_tokens, tx);
+    let inference_req = InferenceRequest::new(req_id, prompt_tokens, max_tokens, temperature, top_p, tx);
 
     engine.submit_request(inference_req);
 
@@ -96,6 +105,8 @@ async fn chat_completions(
         let stream = async_stream::stream! {
             while let Some(token) = rx.recv().await {
                 let content = token.text.clone();
+                let is_done = token.stop_reason.is_some();
+                let finish_reason = token.stop_reason.as_ref().map(finish_reason_str).map(str::to_string);
                 let chunk = ChatCompletionChunk {
                     id: id.clone(),
                     object: "chat.completion.chunk".to_string(),
@@ -107,13 +118,15 @@ async fn chat_completions(
                             role: None,
                             content: Some(content),
                         },
-                        finish_reason: if token.is_eos { Some("stop".to_string()) } else { None },
+                        finish_reason,
                     }],
                 };
-                let event = Event::default().json_data(chunk).unwrap();
+                let event = Event::default()
+                    .json_data(chunk)
+                    .unwrap_or_else(|_| Event::default().data(""));
                 tokio::task::yield_now().await;
                 yield Ok::<_, std::convert::Infallible>(event);
-                if token.is_eos {
+                if is_done {
                     break;
                 }
             }
@@ -126,10 +139,12 @@ async fn chat_completions(
         // Collect full response
         let mut full_content = String::new();
         let mut completion_tokens = 0u32;
+        let mut final_finish_reason = "stop".to_string();
         while let Some(token) = rx.recv().await {
             full_content.push_str(&token.text);
             completion_tokens += 1;
-            if token.is_eos {
+            if let Some(ref reason) = token.stop_reason {
+                final_finish_reason = finish_reason_str(reason).to_string();
                 break;
             }
         }
@@ -144,7 +159,7 @@ async fn chat_completions(
                     role: "assistant".to_string(),
                     content: full_content,
                 },
-                finish_reason: Some("stop".to_string()),
+                finish_reason: Some(final_finish_reason),
             }],
             usage: Some(Usage {
                 prompt_tokens: prompt_tokens_len as u32,

@@ -6,7 +6,6 @@ pub mod model;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use anyhow::Result;
 use tracing::debug;
@@ -35,13 +34,13 @@ pub struct InferenceEngine {
     next_request_id: AtomicU64,
     /// Per-request state for output filtering (e.g. <think> block suppression).
     output_filter_state: Arc<Mutex<HashMap<u64, OutputFilterState>>>,
+    /// Human-readable model identifier (basename of the loaded model file).
+    model_name: String,
 }
 
 #[derive(Default)]
 struct OutputFilterState {
     in_thinking: bool,
-    /// Last character sent (for inserting missing spaces between words)
-    last_char: Option<char>,
 }
 
 impl InferenceEngine {
@@ -49,6 +48,7 @@ impl InferenceEngine {
         model: Arc<dyn Model>,
         scheduler: Arc<crate::scheduler::Scheduler>,
         kv_cache: Arc<KVCacheManager>,
+        model_name: String,
     ) -> Self {
         Self {
             model,
@@ -56,6 +56,7 @@ impl InferenceEngine {
             kv_cache,
             next_request_id: AtomicU64::new(0),
             output_filter_state: Arc::new(Mutex::new(HashMap::new())),
+            model_name,
         }
     }
 
@@ -79,6 +80,11 @@ impl InferenceEngine {
         self.next_request_id.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Human-readable name of the loaded model.
+    pub fn model_name(&self) -> &str {
+        &self.model_name
+    }
+
     /// Main inference loop.
     pub async fn run_loop(self: Arc<Self>) -> Result<()> {
         let engine = self.clone();
@@ -86,11 +92,10 @@ impl InferenceEngine {
             let batch = engine.scheduler.schedule_step();
 
             if batch.is_empty() {
-                tokio::time::sleep(Duration::from_micros(100)).await;
+                engine.scheduler.wait_for_work().await;
                 continue;
             }
 
-            // Run prefill and decode in parallel when both are non-empty
             let prefill_ids = batch.prefill.clone();
             let decode_ids = batch.decode.clone();
 
@@ -117,6 +122,8 @@ impl InferenceEngine {
                 generated_tokens: r.generated_tokens,
                 max_new_tokens: r.max_new_tokens,
                 context_len: r.context_len(),
+                temperature: r.temperature,
+                top_p: r.top_p,
             })
             .collect();
         let model = self.model.clone();
@@ -138,6 +145,8 @@ impl InferenceEngine {
                 generated_tokens: r.generated_tokens,
                 max_new_tokens: r.max_new_tokens,
                 context_len: r.context_len(),
+                temperature: r.temperature,
+                top_p: r.top_p,
             })
             .collect();
         let model = self.model.clone();
@@ -162,6 +171,13 @@ impl InferenceEngine {
             let token_id = logits.sampled_token;
             let is_eos = token_id == eos_token_id;
             let reached_max = req.generated_tokens + 1 >= req.max_new_tokens;
+            let is_done = is_eos || reached_max;
+
+            let stop_reason = if is_done {
+                Some(if is_eos { StopReason::Eos } else { StopReason::Length })
+            } else {
+                None
+            };
 
             // Detokenize for streaming; skip text for EOS (control tokens like <|im_end|>)
             let mut raw_text = if is_eos {
@@ -182,34 +198,26 @@ impl InferenceEngine {
                 token_id,
                 text,
                 is_eos,
+                stop_reason: stop_reason.clone(),
             });
 
             debug!(request_id = req_id, token_id, "token generated");
 
-            if is_eos || reached_max {
-                let reason = if is_eos {
-                    StopReason::Eos
-                } else {
-                    StopReason::Length
-                };
-                self.scheduler.mark_finished(*req_id, reason);
+            if is_done {
+                self.scheduler.mark_finished(*req_id, stop_reason.unwrap());
                 // Clean up filter state
                 if let Ok(mut state) = self.output_filter_state.lock() {
                     state.remove(req_id);
                 }
             } else {
-                if from_prefill {
-                    self.scheduler.mark_prefill_done(*req_id);
-                }
-                self.scheduler.set_last_token(*req_id, token_id);
-                self.scheduler.increment_generated(*req_id);
+                self.scheduler.update_after_token(*req_id, token_id, from_prefill);
             }
         }
 
         Ok(())
     }
 
-    /// Filter output text: remove special tokens, <think> blocks, and control sequences.
+    /// Filter output text: remove special tokens, <think> blocks, and other control sequences.
     fn filter_output_text(&self, req_id: u64, raw: String) -> String {
         if raw.is_empty() {
             return raw;
@@ -227,8 +235,8 @@ impl InferenceEngine {
                 return String::new();
             }
         }
-        // Suppress any token containing <|...|> (common special token pattern)
-        if raw.contains("<|") && raw.contains("|>") {
+        // Suppress tokens containing <|...|> or bare <| (partial special tokens)
+        if raw.contains("<|") {
             return String::new();
         }
 
@@ -244,8 +252,7 @@ impl InferenceEngine {
             if let Some(idx) = raw.find("</think>") {
                 let after = idx + "</think>".len();
                 if after < raw.len() {
-                    let text = raw[after..].to_string();
-                    return Self::maybe_add_space_and_update_last(state, text);
+                    return raw[after..].to_string();
                 }
             }
             return String::new();
@@ -256,35 +263,7 @@ impl InferenceEngine {
             return String::new();
         }
 
-        // 5. Strip any leading/trailing control fragments (e.g. stray "<" or ">")
-        let text = if raw != raw.trim() && !raw.trim().is_empty() {
-            raw.trim().to_string()
-        } else {
-            raw
-        };
-
-        Self::maybe_add_space_and_update_last(state, text)
-    }
-
-    /// Insert space between concatenated words and track last char for next token.
-    fn maybe_add_space_and_update_last(state: &mut OutputFilterState, mut text: String) -> String {
-        fn is_word_char(c: char) -> bool {
-            c.is_alphanumeric() || c == '\'' || c == '-' || c == '\u{00e9}'
-        }
-        if text.is_empty() {
-            return text;
-        }
-        // If prev token ended with word char and this token starts with word char (no space), add one
-        if let Some(prev) = state.last_char {
-            if is_word_char(prev) {
-                let first = text.chars().next().unwrap();
-                if is_word_char(first) && first != ' ' {
-                    text.insert_str(0, " ");
-                }
-            }
-        }
-        state.last_char = text.chars().last();
-        text
+        raw
     }
 
     pub fn kv_cache_usage(&self) -> f32 {

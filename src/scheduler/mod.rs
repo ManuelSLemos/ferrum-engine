@@ -18,6 +18,8 @@ pub struct Scheduler {
     waiting_queue: std::sync::Mutex<VecDeque<InferenceRequest>>,
     running_batch: std::sync::Mutex<Vec<InferenceRequest>>,
     kv_cache: Arc<KVCacheManager>,
+    /// Notified when a new request is submitted, waking the engine loop.
+    work_notify: tokio::sync::Notify,
 }
 
 impl Scheduler {
@@ -26,6 +28,7 @@ impl Scheduler {
             waiting_queue: std::sync::Mutex::new(VecDeque::new()),
             running_batch: std::sync::Mutex::new(Vec::new()),
             kv_cache,
+            work_notify: tokio::sync::Notify::new(),
         }
     }
 
@@ -37,6 +40,13 @@ impl Scheduler {
             .expect("scheduler queue lock");
         info!(request_id = req.id, "request admitted to waiting queue");
         q.push_back(req);
+        drop(q);
+        self.work_notify.notify_one();
+    }
+
+    /// Wait until at least one request is available to schedule.
+    pub async fn wait_for_work(&self) {
+        self.work_notify.notified().await;
     }
 
     /// Number of blocks needed for a request (prompt + max_new_tokens, in blocks).
@@ -130,43 +140,20 @@ impl Scheduler {
         ScheduledBatch { prefill, decode }
     }
 
-    /// Transition request from Prefilling to Decoding after prefill step.
-    pub fn mark_prefill_done(&self, req_id: u64) {
-        let mut running = match self.running_batch.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        for req in running.iter_mut() {
-            if req.id == req_id && req.state == batch::RequestState::Prefilling {
-                req.state = batch::RequestState::Decoding;
-                break;
-            }
-        }
-    }
-
-    /// Increment generated token count for a request.
-    pub fn increment_generated(&self, req_id: u64) {
+    /// Update request state after a generated token in a single lock acquisition.
+    /// Handles prefill→decode transition, last_token, and generated_tokens counter.
+    pub fn update_after_token(&self, req_id: u64, token_id: i32, from_prefill: bool) {
         let mut running = match self.running_batch.lock() {
             Ok(g) => g,
             Err(_) => return,
         };
         for req in running.iter_mut() {
             if req.id == req_id {
+                req.last_token = Some(token_id);
                 req.generated_tokens += 1;
-                break;
-            }
-        }
-    }
-
-    /// Set the last sampled token for a request (used as input for next decode).
-    pub fn set_last_token(&self, req_id: u64, token: i32) {
-        let mut running = match self.running_batch.lock() {
-            Ok(g) => g,
-            Err(_) => return,
-        };
-        for req in running.iter_mut() {
-            if req.id == req_id {
-                req.last_token = Some(token);
+                if from_prefill && req.state == batch::RequestState::Prefilling {
+                    req.state = batch::RequestState::Decoding;
+                }
                 break;
             }
         }
@@ -229,7 +216,7 @@ mod tests {
         let sched = Scheduler::new(kv);
 
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let req = InferenceRequest::new(1, vec![1, 2, 3], 10, tx);
+        let req = InferenceRequest::new(1, vec![1, 2, 3], 10, 1.0, 1.0, tx);
         sched.submit(req);
 
         assert_eq!(sched.queue_depth(), 1);

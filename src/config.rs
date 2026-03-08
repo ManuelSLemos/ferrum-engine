@@ -30,6 +30,10 @@ pub struct Config {
     #[arg(long, default_value = "8080", env = "FERRUM_PORT")]
     pub port: u16,
 
+    /// Maximum context length (tokens) for the model
+    #[arg(long, default_value = "4096", env = "FERRUM_MAX_CONTEXT_LEN")]
+    pub max_context_len: u32,
+
     /// Use JSON log format (for production)
     #[arg(long, env = "FERRUM_JSON_LOGS")]
     pub json_logs: bool,
@@ -52,6 +56,7 @@ mod tests {
             gpu_memory_fraction: 0.85,
             max_batch_size: 32,
             block_size: 16,
+            max_context_len: 4096,
             host: "0.0.0.0".to_string(),
             port: 8080,
             json_logs: false,

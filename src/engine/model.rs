@@ -42,6 +42,10 @@ pub struct InferenceRequestForModel {
     pub generated_tokens: usize,
     pub max_new_tokens: usize,
     pub context_len: usize,
+    /// Sampling temperature (0 = greedy).
+    pub temperature: f32,
+    /// Top-p nucleus sampling threshold (1.0 = disabled).
+    pub top_p: f32,
 }
 
 /// Backend model trait.
@@ -83,12 +87,11 @@ fn sample_greedy(logits: &[f32]) -> i32 {
         .unwrap_or(0)
 }
 
-/// Sample token using top-p (nucleus) sampling.
+/// Sample token using top-p (nucleus) sampling on already-scaled logits.
 fn sample_top_p(logits: &[f32], top_p: f32) -> i32 {
     if top_p >= 1.0 {
         return sample_greedy(logits);
     }
-    // Softmax and cumulative sum
     let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let exp_sum: f32 = logits.iter().map(|&l| (l - max_logit).exp()).sum();
     let mut probs: Vec<(usize, f32)> = logits
@@ -107,6 +110,24 @@ fn sample_top_p(logits: &[f32], top_p: f32) -> i32 {
     probs.last().map(|(i, _)| *i as i32).unwrap_or(0)
 }
 
+/// Sample a token applying temperature scaling and optional top-p.
+fn sample(logits: &[f32], temperature: f32, top_p: f32) -> i32 {
+    // temperature <= 0 or == 1.0 with no top-p → greedy
+    if temperature <= 0.0 {
+        return sample_greedy(logits);
+    }
+    if (temperature - 1.0).abs() < 1e-6 && top_p >= 1.0 {
+        return sample_greedy(logits);
+    }
+    // Apply temperature scaling before sampling
+    if (temperature - 1.0).abs() < 1e-6 {
+        sample_top_p(logits, top_p)
+    } else {
+        let scaled: Vec<f32> = logits.iter().map(|&l| l / temperature).collect();
+        sample_top_p(&scaled, top_p)
+    }
+}
+
 #[cfg(not(ferrum_stub))]
 /// Llama.cpp model via FFI.
 pub struct LlamaCppModel {
@@ -120,7 +141,7 @@ pub struct LlamaCppModel {
 #[cfg(not(ferrum_stub))]
 impl LlamaCppModel {
     /// Load a GGUF model from path.
-    pub fn load(model_path: &std::path::Path, max_batch_size: usize) -> Result<Self> {
+    pub fn load(model_path: &std::path::Path, max_batch_size: usize, max_context_len: u32) -> Result<Self> {
         unsafe {
             ffi::llama_backend_init();
         }
@@ -159,9 +180,9 @@ impl LlamaCppModel {
         };
 
         let mut ctx_params = unsafe { ffi::llama_context_default_params() };
-        // n_batch = max tokens per decode call (must fit full prompt; llama default 2048)
-        ctx_params.n_batch = 2048u32.max(max_batch_size as u32);
-        ctx_params.n_ctx = 2048;
+        ctx_params.n_ctx = max_context_len;
+        // n_batch must be at least as large as n_ctx to handle full prompts in one pass
+        ctx_params.n_batch = max_context_len.max(max_batch_size as u32);
         ctx_params.n_seq_max = 64;
 
         let ctx = unsafe {
@@ -276,11 +297,18 @@ impl LlamaCppModel {
 
         let role_cstrings: Vec<CString> = messages
             .iter()
-            .map(|(r, _)| CString::new(r.as_str()).unwrap())
+            .map(|(r, _)| {
+                // Replace interior null bytes that would truncate the C string
+                let sanitized = r.replace('\0', "");
+                CString::new(sanitized).unwrap_or_else(|_| CString::new("user").unwrap())
+            })
             .collect();
         let content_cstrings: Vec<CString> = messages
             .iter()
-            .map(|(_, c)| CString::new(c.as_str()).unwrap())
+            .map(|(_, c)| {
+                let sanitized = c.replace('\0', "");
+                CString::new(sanitized).unwrap_or_else(|_| CString::new("").unwrap())
+            })
             .collect();
         let chat: Vec<ffi::llama_chat_message> = (0..messages.len())
             .map(|i| ffi::llama_chat_message {
@@ -434,6 +462,7 @@ impl LlamaCppModel {
         let mut results = Vec::with_capacity(requests.len());
 
         for (i, &req_id) in req_ids.iter().enumerate() {
+            let req = requests.get(i);
             let batch_idx = batch_logits_indices.get(i).copied().unwrap_or(-1);
             let logits_ptr = if batch_idx >= 0 {
                 unsafe { ffi::llama_get_logits_ith(ctx, batch_idx) }
@@ -447,7 +476,8 @@ impl LlamaCppModel {
             let logits_slice: &[f32] = unsafe {
                 std::slice::from_raw_parts(logits_ptr, n_vocab as usize)
             };
-            let sampled = sample_greedy(logits_slice);
+            let (temperature, top_p) = req.map(|r| (r.temperature, r.top_p)).unwrap_or((0.0, 1.0));
+            let sampled = sample(logits_slice, temperature, top_p);
             let values: Vec<f32> = logits_slice.to_vec();
             results.push((req_id, Logits::new(values, sampled)));
         }
@@ -499,6 +529,7 @@ impl LlamaCppModel {
         let mut results = Vec::with_capacity(requests.len());
 
         for (out_idx, &req_id) in req_ids.iter().enumerate() {
+            let req = requests.get(out_idx);
             let logits_ptr = unsafe { ffi::llama_get_logits_ith(ctx, out_idx as i32) };
             if logits_ptr.is_null() {
                 results.push((req_id, Logits::new(vec![], self.eos_token)));
@@ -507,7 +538,8 @@ impl LlamaCppModel {
             let logits_slice: &[f32] = unsafe {
                 std::slice::from_raw_parts(logits_ptr, n_vocab as usize)
             };
-            let sampled = sample_greedy(logits_slice);
+            let (temperature, top_p) = req.map(|r| (r.temperature, r.top_p)).unwrap_or((0.0, 1.0));
+            let sampled = sample(logits_slice, temperature, top_p);
             let values: Vec<f32> = logits_slice.to_vec();
             results.push((req_id, Logits::new(values, sampled)));
         }
@@ -574,8 +606,9 @@ impl LlamaCppModel {
     pub fn load(
         model_path: &std::path::Path,
         max_batch_size: usize,
+        max_context_len: u32,
     ) -> Result<Self> {
-        let _ = (model_path, max_batch_size);
+        let _ = (model_path, max_batch_size, max_context_len);
         let config = ModelConfig {
             num_layers: 32,
             num_heads: 32,

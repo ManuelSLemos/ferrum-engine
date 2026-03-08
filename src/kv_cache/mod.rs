@@ -3,7 +3,6 @@
 // Total blocks computed from: gpu_memory_bytes * fraction / bytes_per_block
 // bytes_per_block = block_size × num_layers × num_heads_kv × head_dim × 2 (K+V) × 2 (f16)
 
-use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -49,8 +48,6 @@ pub struct KVCacheManager {
     free_list: Mutex<Vec<BlockId>>,
     /// Number of currently allocated blocks (for memory_usage)
     allocated_count: AtomicUsize,
-    /// Track allocated blocks for validation (optional, for debugging)
-    _allocated_set: Mutex<HashSet<BlockId>>,
 }
 
 impl KVCacheManager {
@@ -89,7 +86,6 @@ impl KVCacheManager {
             block_size,
             free_list: Mutex::new(free_list),
             allocated_count: AtomicUsize::new(0),
-            _allocated_set: Mutex::new(HashSet::new()),
         }
     }
 
@@ -112,12 +108,6 @@ impl KVCacheManager {
             ids.push(guard.pop().expect("len checked"));
         }
         self.allocated_count.fetch_add(n, Ordering::Relaxed);
-        drop(guard);
-
-        let mut set = self._allocated_set.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {}", e))?;
-        for &id in &ids {
-            set.insert(id);
-        }
         Ok(ids)
     }
 
@@ -131,14 +121,6 @@ impl KVCacheManager {
             guard.push(id);
         }
         self.allocated_count.fetch_sub(ids.len(), Ordering::Relaxed);
-
-        let mut set = match self._allocated_set.lock() {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        for &id in ids {
-            set.remove(&id);
-        }
     }
 
     /// Append one block for a request. Returns the block ID if allocated.
