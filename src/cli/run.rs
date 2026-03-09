@@ -1,4 +1,4 @@
-// `ferrum run` — single-shot inference, streaming output to stdout.
+// `fox run` — single-shot inference, streaming output to stdout.
 // Reuses the full engine stack (Scheduler + InferenceEngine) without an HTTP server.
 
 use std::io::Write as _;
@@ -17,7 +17,7 @@ use super::get_gpu_memory_bytes;
 #[derive(Parser, Debug)]
 pub struct RunArgs {
     /// Path to the GGUF model file
-    #[arg(long, env = "FERRUM_MODEL_PATH")]
+    #[arg(long, env = "FOX_MODEL_PATH")]
     pub model_path: PathBuf,
 
     /// The prompt to send to the model
@@ -51,7 +51,7 @@ pub struct RunArgs {
     #[arg(
         long,
         default_value = "You are a helpful assistant.",
-        env = "FERRUM_SYSTEM_PROMPT"
+        env = "FOX_SYSTEM_PROMPT"
     )]
     pub system_prompt: String,
 
@@ -72,7 +72,7 @@ pub struct RunArgs {
     pub block_size: usize,
 
     /// Fraction of GPU memory reserved for CPU↔GPU KV-cache swap space (0.0-1.0).
-    /// Set to 0 to disable (default). Currently a placeholder — see `ferrum serve --help`.
+    /// Set to 0 to disable (default). Currently a placeholder — see `fox serve --help`.
     #[arg(long, default_value = "0.0")]
     pub swap_fraction: f32,
 

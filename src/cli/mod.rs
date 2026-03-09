@@ -7,7 +7,7 @@ pub mod serve;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "ferrum")]
+#[command(name = "fox")]
 #[command(about = "High-performance LLM inference engine")]
 #[command(version)]
 pub struct Cli {

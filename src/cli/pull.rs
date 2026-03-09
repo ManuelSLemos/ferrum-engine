@@ -1,9 +1,9 @@
-// `ferrum pull` — download a GGUF model from HuggingFace Hub.
+// `fox pull` — download a GGUF model from HuggingFace Hub.
 //
 // Usage:
-//   ferrum pull bartowski/Llama-3.2-1B-Instruct-GGUF
-//   ferrum pull bartowski/Llama-3.2-1B-Instruct-GGUF --filename Llama-3.2-1B-Instruct-Q4_K_M.gguf
-//   ferrum pull bartowski/Llama-3.2-1B-Instruct-GGUF --output-dir ./models
+//   fox pull bartowski/Llama-3.2-1B-Instruct-GGUF
+//   fox pull bartowski/Llama-3.2-1B-Instruct-GGUF --filename Llama-3.2-1B-Instruct-Q4_K_M.gguf
+//   fox pull bartowski/Llama-3.2-1B-Instruct-GGUF --output-dir ./models
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -27,8 +27,8 @@ pub struct PullArgs {
     pub filename: Option<String>,
 
     /// Directory where the model file will be saved.
-    /// Defaults to `~/.cache/ferrum/models/`
-    #[arg(long, default_value = "~/.cache/ferrum/models")]
+    /// Defaults to `~/.cache/ferrumox/models/`
+    #[arg(long, default_value = "~/.cache/ferrumox/models")]
     pub output_dir: PathBuf,
 
     /// HuggingFace API token for private or gated models
@@ -180,11 +180,11 @@ pub async fn run_pull(args: PullArgs) -> Result<()> {
 
     eprintln!("\nSaved to: {}", dest.display());
     eprintln!(
-        "Run with:  ferrum run --model-path \"{}\" \"Your prompt here\"",
+        "Run with:  fox run --model-path \"{}\" \"Your prompt here\"",
         dest.display()
     );
     eprintln!(
-        "Serve:     ferrum serve --model-path \"{}\"",
+        "Serve:     fox serve --model-path \"{}\"",
         dest.display()
     );
 
@@ -202,7 +202,7 @@ fn build_client(token: Option<&str>) -> Result<reqwest::Client> {
     }
     reqwest::Client::builder()
         .default_headers(headers)
-        .user_agent("ferrum-engine/0.4.0")
+        .user_agent("ferrumox/0.4.0")
         .build()
         .context("building HTTP client")
 }

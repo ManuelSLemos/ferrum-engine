@@ -1,9 +1,22 @@
 # Changelog
 
-All notable changes to ferrum-engine are documented in this file.
+All notable changes to ferrumox are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [0.6.0] - 2026-03-09
+
+### Changed
+
+- **Project renamed from `ferrum-engine` to `ferrumox`** — the CLI binary is now `fox`, the benchmark binary is `fox-bench`.
+  - All environment variables renamed from `FERRUM_*` to `FOX_*` (e.g. `FOX_MODEL_PATH`, `FOX_PORT`).
+  - Model cache directory changed from `~/.cache/ferrum/models` to `~/.cache/ferrumox/models`.
+  - Prometheus metric names updated from `ferrum_*` to `ferrumox_*`.
+  - Build stub flag renamed from `FERRUM_SKIP_LLAMA` to `FOX_SKIP_LLAMA`.
+  - Docker image tag changed from `ferrum-engine:latest` to `ferrumox:latest`.
 
 ---
 

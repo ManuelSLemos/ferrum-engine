@@ -1,26 +1,26 @@
 // Model trait and LlamaCppModel implementation.
 // Uses llama.cpp FFI for GGUF loading and inference.
 
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 use std::cmp::Ordering;
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 use std::ffi::CString;
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 use std::os::raw::c_char;
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 use std::ptr::NonNull;
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 use std::sync::Arc;
 
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 use anyhow::anyhow;
 use anyhow::Result;
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 use rand::rngs::StdRng;
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 use rand::{Rng, SeedableRng};
 
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 use super::ffi;
 
 /// Model architecture configuration.
@@ -138,7 +138,7 @@ pub trait Model: Send + Sync {
 }
 
 /// Sample the highest-probability token (deterministic).
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 fn sample_greedy(logits: &[f32]) -> i32 {
     logits
         .iter()
@@ -149,7 +149,7 @@ fn sample_greedy(logits: &[f32]) -> i32 {
 }
 
 /// Apply repetition penalty in-place: divide positive logits and multiply negative ones.
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 fn apply_repetition_penalty(logits: &mut [f32], token_ids: &[i32], penalty: f32) {
     for &tid in token_ids {
         if tid >= 0 && (tid as usize) < logits.len() {
@@ -160,7 +160,7 @@ fn apply_repetition_penalty(logits: &mut [f32], token_ids: &[i32], penalty: f32)
 }
 
 /// Parameters for the full stochastic sampler.
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 struct SamplerParams<'a> {
     temperature: f32,
     top_p: f32,
@@ -175,7 +175,7 @@ struct SamplerParams<'a> {
 ///
 /// When `temperature` ≤ 0 the function falls back to greedy regardless of other parameters.
 /// The RNG is seeded per-request for reproducibility when `seed` is provided.
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 fn sample_token(logits: &[f32], p: SamplerParams<'_>) -> i32 {
     let SamplerParams {
         temperature,
@@ -258,7 +258,7 @@ fn sample_token(logits: &[f32], p: SamplerParams<'_>) -> i32 {
     probs.last().map(|(idx, _)| *idx as i32).unwrap_or(0)
 }
 
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 /// Llama.cpp model via FFI.
 pub struct LlamaCppModel {
     _model: NonNull<ffi::llama_model>,
@@ -268,7 +268,7 @@ pub struct LlamaCppModel {
     eos_token: i32,
 }
 
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 impl LlamaCppModel {
     /// Load a GGUF model from path.
     pub fn load(
@@ -779,12 +779,12 @@ impl LlamaCppModel {
     }
 }
 
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 unsafe impl Send for LlamaCppModel {}
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 unsafe impl Sync for LlamaCppModel {}
 
-#[cfg(not(ferrum_stub))]
+#[cfg(not(fox_stub))]
 impl Model for LlamaCppModel {
     fn prefill_sync(
         &self,
@@ -873,15 +873,15 @@ impl Model for LlamaCppModel {
     }
 }
 
-// ==================== Stub implementation (when FERRUM_SKIP_LLAMA or no llama.cpp) ====================
+// ==================== Stub implementation (when FOX_SKIP_LLAMA or no llama.cpp) ====================
 
-#[cfg(ferrum_stub)]
+#[cfg(fox_stub)]
 /// Stub LlamaCppModel when llama.cpp is not built.
 pub struct LlamaCppModel {
     config: ModelConfig,
 }
 
-#[cfg(ferrum_stub)]
+#[cfg(fox_stub)]
 impl LlamaCppModel {
     pub fn load(
         model_path: &std::path::Path,
@@ -900,12 +900,12 @@ impl LlamaCppModel {
     }
 }
 
-#[cfg(ferrum_stub)]
+#[cfg(fox_stub)]
 unsafe impl Send for LlamaCppModel {}
-#[cfg(ferrum_stub)]
+#[cfg(fox_stub)]
 unsafe impl Sync for LlamaCppModel {}
 
-#[cfg(ferrum_stub)]
+#[cfg(fox_stub)]
 impl Model for LlamaCppModel {
     fn prefill_sync(
         &self,
@@ -975,7 +975,7 @@ impl Model for LlamaCppModel {
     }
 }
 
-#[cfg(all(test, not(ferrum_stub)))]
+#[cfg(all(test, not(fox_stub)))]
 mod tests {
     use super::*;
 
