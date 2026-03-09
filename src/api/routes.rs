@@ -2,6 +2,7 @@
 
 use axum::{
     extract::State,
+    http::header,
     response::{IntoResponse, sse::{Event, KeepAlive, Sse}},
     routing::{get, post},
     Json, Router,
@@ -21,7 +22,27 @@ pub fn router(engine: Arc<InferenceEngine>) -> Router {
         .route("/v1/completions", post(completions))
         .route("/v1/models", get(models))
         .route("/health", get(health))
+        .route("/metrics", get(metrics_handler))
         .with_state(engine)
+}
+
+/// Prometheus text-format scrape endpoint.
+async fn metrics_handler() -> impl IntoResponse {
+    let encoder = prometheus::TextEncoder::new();
+    let metric_families = prometheus::gather();
+    let mut body = String::new();
+    if let Err(e) = encoder.encode_utf8(&metric_families, &mut body) {
+        return (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("metrics encoding error: {e}"),
+        );
+    }
+    (
+        axum::http::StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    )
 }
 
 async fn health(State(engine): State<Arc<InferenceEngine>>) -> Json<HealthResponse> {

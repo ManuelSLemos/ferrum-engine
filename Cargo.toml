@@ -1,6 +1,6 @@
 [package]
 name = "ferrum-engine"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "High-performance LLM inference engine - alternative to Ollama and vLLM"
 license = "MIT OR Apache-2.0"
@@ -28,6 +28,8 @@ futures = "0.3"
 async-trait = "0.1"
 uuid = { version = "1.11", features = ["v4"] }
 async-stream = "0.3"
+
+prometheus = "0.14"
 
 # Optional
 cudarc = { version = "0.12", optional = true }

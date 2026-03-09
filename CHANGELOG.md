@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-03-09
+
+### Added
+
+- **PageTable — explicit logical→physical block mapping** (`src/kv_cache/mod.rs`)
+  - Replaced the flat `kv_block_ids: Vec<BlockId>` field in `InferenceRequest` with a named
+    `PageTable` struct. The struct encapsulates the `entries` vector
+    (`logical_block_index → physical_block_id`) and exposes `block_ids()`, `len()`,
+    `is_empty()`, `clear()`, and `extend()`.
+  - Added `ref_count: Vec<AtomicUsize>` to `KVCacheManager` (one entry per physical block).
+    `allocate` sets `ref_count = 1`; `free_blocks` decrements and only returns the block to the
+    free list when the count reaches zero.
+  - `retain_block(id)` — increments ref_count (used when a block is shared for prefix caching).
+  - `copy_on_write(id) -> Option<BlockId>` — allocates a new exclusive block and decrements the
+    shared one's ref_count; foundational for future true memory-sharing CoW.
+
+- **Prefix caching — skip re-prefill for identical prompts** (`src/scheduler/mod.rs`, `src/engine/mod.rs`, `src/engine/model.rs`)
+  - `Scheduler` now embeds a `PrefixCache: HashMap<u64, PrefixCacheEntry>` keyed by
+    `hash(prompt_tokens)`. Max capacity = `max_batch_size / 4` entries.
+  - When a request finishes (EOS, Length, or StopSequence), `InferenceEngine` calls
+    `Scheduler::try_insert_prefix` which atomically transfers the request's `kv_seq_id` and
+    `page_table` blocks into the cache (the KV data in llama.cpp is preserved — `clear_sequence`
+    is skipped for cached entries).
+  - On the next admission of a request with the same prompt hash, `schedule_step` detects the
+    hit, transfers the cached blocks to the new request's `PageTable`, allocates only the
+    generation blocks, sets `skip_prefix_tokens` and `prefix_seq_id` on the request.
+  - `do_prefill` calls `llama_memory_seq_cp(mem, prefix_seq_id, new_seq_id, 0, skip_tokens)`
+    inside the blocking task before building the batch, then submits only
+    `prompt_tokens[skip_prefix_tokens..]` starting at the correct absolute position.
+    After prefill, the engine clears the now-redundant prefix sequence and returns its ID to
+    the pool via `Scheduler::return_prefix_seq_id`.
+  - New `Model` trait method: `copy_sequence_range(src, dst, token_count)`, backed by
+    `llama_memory_seq_cp`; no-op in the stub.
+  - Counters `prefix_hits` / `prefix_misses` (atomic) on `Scheduler`; exposed on `InferenceEngine`.
+
+- **Stop sequences** (`src/scheduler/batch.rs`, `src/engine/mod.rs`, `src/api/types.rs`)
+  - `SamplingParams` gains `stop: Option<Vec<String>>`.
+  - `ChatCompletionRequest.stop` accepts both a JSON string and an array (OpenAI spec). Uses a
+    custom `deserialize_stop` Serde helper.
+  - `StopReason::StopSequence` variant added.
+  - `handle_logits` now runs a rolling-buffer stop-sequence check (last `2 × max_stop_len` chars)
+    per request. The stop string is **not** emitted in the output; only the prefix before the
+    match is sent to the client (OpenAI behaviour). Detection works across token boundaries.
+  - Output filtering (`<think>` suppression, special token stripping) and stop sequence detection
+    now share a single lock acquisition on `per_request_state` to prevent deadlocks.
+
+- **Prometheus `/metrics` endpoint** (`src/metrics.rs`, `src/api/routes.rs`, `src/main.rs`)
+  - New `GET /metrics` route returning Prometheus text exposition format (version 0.0.4).
+  - Metrics registered at startup via `Metrics::new()`:
+    - `ferrum_requests_total{finish_reason}` — counter
+    - `ferrum_tokens_generated_total` — counter
+    - `ferrum_request_latency_seconds` — histogram (10 buckets: 0.05 s … 60 s)
+    - `ferrum_kv_cache_usage_ratio` — gauge
+    - `ferrum_queue_depth` — gauge
+    - `ferrum_active_requests` — gauge
+    - `ferrum_prefix_cache_hits_total` — counter
+    - `ferrum_prefix_cache_misses_total` — counter
+  - Dependency added: `prometheus = "0.14"`.
+  - Gauges and counter deltas are refreshed on every engine scheduling step.
+
+### Changed
+
+- `InferenceRequest` fields: `kv_block_ids: Vec<BlockId>` → `page_table: PageTable`;
+  new fields `skip_prefix_tokens: usize`, `prefix_seq_id: Option<i32>`,
+  `submitted_at: Instant` (for latency metrics).
+- `InferenceEngine::new` now accepts `metrics: Option<Arc<Metrics>>`.
+- `OutputFilterState` renamed to `PerRequestState`; its `text_buffer` field drives stop
+  sequence detection.
+- `PLAN.md` updated: Phase 1 marked completed with v0.1.0/v0.2.0 summaries; Phase 2
+  progress tracked.
+
+---
+
+All notable changes to ferrum-engine are documented in this file.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
 ## [0.2.0] - 2026-03-09
 
 ### Added

@@ -99,7 +99,7 @@ impl Scheduler {
     fn blocks_needed(&self, req: &InferenceRequest) -> usize {
         let total_tokens = req.prompt_tokens.len() + req.max_new_tokens;
         let block_size = self.kv_cache.block_size();
-        (total_tokens + block_size - 1) / block_size
+        total_tokens.div_ceil(block_size)
     }
 
     /// One scheduling step. Returns prefill and decode batches.
@@ -165,7 +165,7 @@ impl Scheduler {
                 // Only need blocks for the generation portion (prompt is already cached).
                 let gen_blocks = {
                     let block_size = self.kv_cache.block_size();
-                    (req.max_new_tokens + block_size - 1) / block_size
+                    req.max_new_tokens.div_ceil(block_size)
                 };
 
                 if self.kv_cache.can_allocate(gen_blocks) || gen_blocks == 0 {

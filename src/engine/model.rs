@@ -130,20 +130,31 @@ fn apply_repetition_penalty(logits: &mut [f32], token_ids: &[i32], penalty: f32)
     }
 }
 
-/// Full stochastic sampler: repetition penalty → temperature → top-K → top-P → weighted draw.
-///
-/// When `temperature` ≤ 0 the function falls back to greedy regardless of other parameters.
-/// The RNG is seeded per-request for reproducibility when `seed` is provided.
-fn sample_token(
-    logits: &[f32],
+/// Parameters for the full stochastic sampler.
+struct SamplerParams<'a> {
     temperature: f32,
     top_p: f32,
     top_k: u32,
     repetition_penalty: f32,
-    generated_ids: &[i32],
+    generated_ids: &'a [i32],
     seed: Option<u64>,
     token_count: usize,
-) -> i32 {
+}
+
+/// Full stochastic sampler: repetition penalty → temperature → top-K → top-P → weighted draw.
+///
+/// When `temperature` ≤ 0 the function falls back to greedy regardless of other parameters.
+/// The RNG is seeded per-request for reproducibility when `seed` is provided.
+fn sample_token(logits: &[f32], p: SamplerParams<'_>) -> i32 {
+    let SamplerParams {
+        temperature,
+        top_p,
+        top_k,
+        repetition_penalty,
+        generated_ids,
+        seed,
+        token_count,
+    } = p;
     let mut logits = logits.to_vec();
 
     // 1. Repetition penalty
@@ -281,9 +292,14 @@ impl LlamaCppModel {
             anyhow!("llama_init_from_model failed")
         })?;
 
+        // SAFETY: We manually implement Send + Sync for LlamaCppModel below.
+        // The Arc<Mutex<NonNull<...>>> is intentionally used here for shared ownership
+        // across clone (e.g. future multi-backend); the unsafe impls guarantee thread safety.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let ctx_arc = Arc::new(std::sync::Mutex::new(ctx));
         Ok(Self {
             _model: model,
-            _ctx: Arc::new(std::sync::Mutex::new(ctx)),
+            _ctx: ctx_arc,
             vocab,
             config,
             eos_token,
@@ -423,11 +439,11 @@ impl LlamaCppModel {
                     std::ffi::CStr::from_ptr(p).to_str().ok().map(|s| s as &str)
                 }
             };
-            if let Some(ref s) = from_model {
-                vec![Some(s)]
-            } else {
-                vec![None]
-            }
+        if let Some(s) = from_model {
+            vec![Some(s)]
+        } else {
+            vec![None]
+        }
         };
 
         // Built-in template names - llama_chat_apply_template looks them up by name
@@ -609,14 +625,15 @@ impl LlamaCppModel {
                 std::slice::from_raw_parts(logits_ptr, n_vocab as usize)
             };
             let sampled = if let Some(r) = req {
-                sample_token(
-                    logits_slice,
-                    r.temperature, r.top_p, r.top_k,
-                    r.repetition_penalty,
-                    &r.generated_token_ids,
-                    r.seed,
-                    r.generated_tokens,
-                )
+                sample_token(logits_slice, SamplerParams {
+                    temperature: r.temperature,
+                    top_p: r.top_p,
+                    top_k: r.top_k,
+                    repetition_penalty: r.repetition_penalty,
+                    generated_ids: &r.generated_token_ids,
+                    seed: r.seed,
+                    token_count: r.generated_tokens,
+                })
             } else {
                 sample_greedy(logits_slice)
             };
@@ -680,14 +697,15 @@ impl LlamaCppModel {
                 std::slice::from_raw_parts(logits_ptr, n_vocab as usize)
             };
             let sampled = if let Some(r) = req {
-                sample_token(
-                    logits_slice,
-                    r.temperature, r.top_p, r.top_k,
-                    r.repetition_penalty,
-                    &r.generated_token_ids,
-                    r.seed,
-                    r.generated_tokens,
-                )
+                sample_token(logits_slice, SamplerParams {
+                    temperature: r.temperature,
+                    top_p: r.top_p,
+                    top_k: r.top_k,
+                    repetition_penalty: r.repetition_penalty,
+                    generated_ids: &r.generated_token_ids,
+                    seed: r.seed,
+                    token_count: r.generated_tokens,
+                })
             } else {
                 sample_greedy(logits_slice)
             };

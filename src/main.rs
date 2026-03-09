@@ -8,6 +8,7 @@ use ferrum_engine::config::Config;
 use ferrum_engine::engine::model::{LlamaCppModel, Model};
 use ferrum_engine::engine::InferenceEngine;
 use ferrum_engine::kv_cache::KVCacheManager;
+use ferrum_engine::metrics::Metrics;
 use ferrum_engine::scheduler::Scheduler;
 
 #[tokio::main]
@@ -61,8 +62,25 @@ async fn main() -> Result<()> {
     let scheduler = Scheduler::new(kv_cache.clone(), config.max_batch_size);
     let scheduler = std::sync::Arc::new(scheduler);
 
+    let metrics = match Metrics::new() {
+        Ok(m) => {
+            tracing::info!("Prometheus metrics registered; scrape at /metrics");
+            Some(std::sync::Arc::new(m))
+        }
+        Err(e) => {
+            tracing::warn!("failed to register Prometheus metrics: {}", e);
+            None
+        }
+    };
+
     let model = std::sync::Arc::new(model);
-    let engine = InferenceEngine::new(model.clone(), scheduler.clone(), kv_cache.clone(), model_name);
+    let engine = InferenceEngine::new(
+        model.clone(),
+        scheduler.clone(),
+        kv_cache.clone(),
+        model_name,
+        metrics,
+    );
     let engine = std::sync::Arc::new(engine);
 
     let addr: std::net::SocketAddr = format!("{}:{}", config.host, config.port)

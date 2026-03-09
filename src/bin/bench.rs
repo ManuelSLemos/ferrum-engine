@@ -1,18 +1,18 @@
-/// ferrum-bench — integrated benchmark tool for ferrum-engine.
-///
-/// Launches N concurrent workers, each sending `--requests` chat completions
-/// to the target server, and reports:
-///   - TTFT  (time to first token): P50 / P95
-///   - Total latency per request:   P50 / P95 / P99
-///   - Aggregate throughput:        tokens / second
-///
-/// Usage:
-///   ferrum-bench --url http://localhost:8080 \
-///     --model my-model \
-///     --concurrency 8 \
-///     --requests 50 \
-///     --prompt "Escribe un párrafo sobre Rust" \
-///     --max-tokens 256
+//! ferrum-bench — integrated benchmark tool for ferrum-engine.
+//!
+//! Launches N concurrent workers, each sending `--requests` chat completions
+//! to the target server, and reports:
+//!   - TTFT  (time to first token): P50 / P95
+//!   - Total latency per request:   P50 / P95 / P99
+//!   - Aggregate throughput:        tokens / second
+//!
+//! Usage:
+//!   ferrum-bench --url http://localhost:8080 \
+//!     --model my-model \
+//!     --concurrency 8 \
+//!     --requests 50 \
+//!     --prompt "Escribe un párrafo sobre Rust" \
+//!     --max-tokens 256
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
