@@ -3,9 +3,9 @@
 mod ffi;
 pub mod model;
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -233,16 +233,22 @@ impl InferenceEngine {
 
             // Refresh gauges and propagate counter deltas every scheduling step.
             if let Some(m) = &engine.metrics {
-                m.kv_cache_usage_ratio.set(engine.kv_cache.memory_usage() as f64);
+                m.kv_cache_usage_ratio
+                    .set(engine.kv_cache.memory_usage() as f64);
                 m.queue_depth.set(engine.scheduler.queue_depth() as i64);
-                m.active_requests.set(engine.scheduler.active_requests() as i64);
+                m.active_requests
+                    .set(engine.scheduler.active_requests() as i64);
 
                 let cur_hits = engine.scheduler.prefix_hits.load(Ordering::Relaxed);
                 let cur_misses = engine.scheduler.prefix_misses.load(Ordering::Relaxed);
                 let dh = cur_hits.saturating_sub(last_prefix_hits);
                 let dm = cur_misses.saturating_sub(last_prefix_misses);
-                if dh > 0 { m.prefix_cache_hits_total.inc_by(dh); }
-                if dm > 0 { m.prefix_cache_misses_total.inc_by(dm); }
+                if dh > 0 {
+                    m.prefix_cache_hits_total.inc_by(dh);
+                }
+                if dm > 0 {
+                    m.prefix_cache_misses_total.inc_by(dm);
+                }
                 last_prefix_hits = cur_hits;
                 last_prefix_misses = cur_misses;
             }
@@ -301,11 +307,10 @@ impl InferenceEngine {
 
         let model = self.model.clone();
         let req_ids_vec = req_ids.to_vec();
-        let result = tokio::task::spawn_blocking(move || {
-            model.prefill_sync(&req_ids_vec, &model_requests)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("prefill spawn_blocking: {}", e))??;
+        let result =
+            tokio::task::spawn_blocking(move || model.prefill_sync(&req_ids_vec, &model_requests))
+                .await
+                .map_err(|e| anyhow::anyhow!("prefill spawn_blocking: {}", e))??;
 
         for prefix_seq_id in prefix_cleanup {
             self.model.clear_sequence(prefix_seq_id);
@@ -351,7 +356,9 @@ impl InferenceEngine {
 
         for (req_id, logits) in results {
             let req = running.iter().find(|r| r.id == *req_id);
-            let Some(req) = req else { continue; };
+            let Some(req) = req else {
+                continue;
+            };
 
             let token_id = logits.sampled_token;
             let is_eos = token_id == eos_token_id;
@@ -374,7 +381,10 @@ impl InferenceEngine {
                     Err(_) => {
                         // Lock poisoned — skip processing, emit raw text with no stop check.
                         let _ = req.response_tx.send(Token {
-                            id: *req_id, token_id, text: raw_text, is_eos,
+                            id: *req_id,
+                            token_id,
+                            text: raw_text,
+                            is_eos,
                             stop_reason: None,
                         });
                         continue;
@@ -407,7 +417,10 @@ impl InferenceEngine {
                 stop_reason: stop_reason.clone(),
             });
 
-            debug!(request_id = req_id, token_id, is_stop_hit, "token generated");
+            debug!(
+                request_id = req_id,
+                token_id, is_stop_hit, "token generated"
+            );
 
             // Record per-token metrics.
             if let Some(m) = &self.metrics {
@@ -432,7 +445,9 @@ impl InferenceEngine {
                 // Cache the KV state for potential prefix reuse on future identical prompts.
                 let should_clear = if matches!(
                     stop_reason,
-                    Some(StopReason::Eos) | Some(StopReason::Length) | Some(StopReason::StopSequence)
+                    Some(StopReason::Eos)
+                        | Some(StopReason::Length)
+                        | Some(StopReason::StopSequence)
                 ) {
                     let hash = hash_tokens(&req.prompt_tokens);
                     !self.scheduler.try_insert_prefix(*req_id, hash)
@@ -450,7 +465,8 @@ impl InferenceEngine {
                     state.remove(req_id);
                 }
             } else {
-                self.scheduler.update_after_token(*req_id, token_id, from_prefill);
+                self.scheduler
+                    .update_after_token(*req_id, token_id, from_prefill);
             }
         }
 

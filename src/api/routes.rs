@@ -3,7 +3,10 @@
 use axum::{
     extract::State,
     http::header,
-    response::{IntoResponse, sse::{Event, KeepAlive, Sse}},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
     routing::{get, post},
     Json, Router,
 };
@@ -40,7 +43,10 @@ async fn metrics_handler() -> impl IntoResponse {
     }
     (
         axum::http::StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
         body,
     )
 }
@@ -92,17 +98,21 @@ async fn chat_completions(
         .collect();
     // Prepend system message if missing (helps Qwen, Llama, etc. generate properly)
     if messages.first().map(|(r, _)| r.as_str()) != Some("system") {
-        messages.insert(0, ("system".to_string(), "You are a helpful assistant.".to_string()));
+        messages.insert(
+            0,
+            (
+                "system".to_string(),
+                "You are a helpful assistant.".to_string(),
+            ),
+        );
     }
-    let prompt = engine
-        .apply_chat_template(&messages)
-        .unwrap_or_else(|_| {
-            messages
-                .iter()
-                .map(|(r, c)| format!("{}: {}", r, c))
-                .collect::<Vec<_>>()
-                .join("\n")
-        });
+    let prompt = engine.apply_chat_template(&messages).unwrap_or_else(|_| {
+        messages
+            .iter()
+            .map(|(r, c)| format!("{}: {}", r, c))
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
 
     // Tokenize using model's vocabulary
     let prompt_tokens: Vec<i32> = engine.tokenize(&prompt).unwrap_or_else(|_| {

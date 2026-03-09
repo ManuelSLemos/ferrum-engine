@@ -1,7 +1,7 @@
 // Batch types and InferenceRequest for the scheduler.
 
-use tokio::sync::mpsc;
 use crate::kv_cache::PageTable;
+use tokio::sync::mpsc;
 
 /// All sampling hyper-parameters for a single inference request.
 #[derive(Debug, Clone)]

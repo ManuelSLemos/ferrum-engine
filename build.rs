@@ -8,7 +8,9 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(ferrum_stub)");
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let llama_root = PathBuf::from(&manifest_dir).join("vendor").join("llama.cpp");
+    let llama_root = PathBuf::from(&manifest_dir)
+        .join("vendor")
+        .join("llama.cpp");
 
     if env::var("FERRUM_SKIP_LLAMA").is_ok() || !llama_root.exists() {
         if !llama_root.exists() {
@@ -50,8 +52,14 @@ fn main() {
     let build_dir = dst.join("build");
 
     // llama.cpp puts libllama.a in build/src, ggml libs in build/ggml/src
-    println!("cargo:rustc-link-search=native={}", build_dir.join("src").display());
-    println!("cargo:rustc-link-search=native={}", build_dir.join("ggml").join("src").display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        build_dir.join("src").display()
+    );
+    println!(
+        "cargo:rustc-link-search=native={}",
+        build_dir.join("ggml").join("src").display()
+    );
 
     println!("cargo:rustc-link-lib=static=llama");
     println!("cargo:rustc-link-lib=static=ggml");
@@ -72,10 +80,7 @@ fn main() {
     let ggml_include = llama_root.join("ggml").join("include");
     let ggml_build_include = llama_root.join("build").join("ggml").join("include");
 
-    let mut include_paths = vec![
-        llama_include.clone(),
-        ggml_include.clone(),
-    ];
+    let mut include_paths = vec![llama_include.clone(), ggml_include.clone()];
     if ggml_build_include.exists() {
         include_paths.push(ggml_build_include);
     }

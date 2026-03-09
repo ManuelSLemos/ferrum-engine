@@ -4,13 +4,15 @@
 
 mod batch;
 
-pub use batch::{InferenceRequest, SamplingParams, ScheduledBatch, StopReason, RequestState, Token};
+pub use batch::{
+    InferenceRequest, RequestState, SamplingParams, ScheduledBatch, StopReason, Token,
+};
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use tracing::{debug, info};
 
@@ -80,10 +82,7 @@ impl Scheduler {
 
     /// Submit a request to the waiting queue.
     pub fn submit(&self, req: InferenceRequest) {
-        let mut q = self
-            .waiting_queue
-            .lock()
-            .expect("scheduler queue lock");
+        let mut q = self.waiting_queue.lock().expect("scheduler queue lock");
         info!(request_id = req.id, "request admitted to waiting queue");
         q.push_back(req);
         drop(q);
@@ -129,8 +128,9 @@ impl Scheduler {
         // 1. Evict Finished and free blocks + return seq IDs.
         //    Requests whose kv_seq_id == -1 and page_table is empty were already transferred
         //    to the prefix cache by try_insert_prefix — skip them.
-        let (finished, still_running): (Vec<_>, Vec<_>) =
-            std::mem::take(&mut *running).into_iter().partition(|r| r.is_finished());
+        let (finished, still_running): (Vec<_>, Vec<_>) = std::mem::take(&mut *running)
+            .into_iter()
+            .partition(|r| r.is_finished());
 
         for req in &finished {
             if !req.page_table.is_empty() {
@@ -218,7 +218,11 @@ impl Scheduler {
                             req.page_table = PageTable::new(ids);
                             req.kv_seq_id = pool.pop().expect("pool non-empty checked above");
                             req.state = batch::RequestState::Prefilling;
-                            info!(request_id = id, seq_id = req.kv_seq_id, "request admitted to batch");
+                            info!(
+                                request_id = id,
+                                seq_id = req.kv_seq_id,
+                                "request admitted to batch"
+                            );
                             running.push(req);
                             prefill.push(id);
                             continue 'admit;
@@ -247,7 +251,10 @@ impl Scheduler {
                     pool.push(evicted.kv_seq_id);
                     evicted.kv_seq_id = -1;
                 }
-                info!(request_id = evicted.id, "LIFO preemption: evicted from batch");
+                info!(
+                    request_id = evicted.id,
+                    "LIFO preemption: evicted from batch"
+                );
                 waiting.push_front(evicted);
             }
             break;
@@ -260,7 +267,11 @@ impl Scheduler {
             }
         }
 
-        ScheduledBatch { prefill, decode, preempted_seq_ids }
+        ScheduledBatch {
+            prefill,
+            decode,
+            preempted_seq_ids,
+        }
     }
 
     /// Update request state after a generated token.
@@ -325,12 +336,15 @@ impl Scheduler {
                 let block_ids = std::mem::take(&mut req.page_table).entries;
                 // Zero out the request's ownership so schedule_step won't double-free.
                 req.kv_seq_id = -1;
-                pcache.insert(token_hash, PrefixCacheEntry { seq_id, block_ids, token_count });
-                debug!(
-                    request_id = req_id,
-                    token_count,
-                    "cached prefix KV state"
+                pcache.insert(
+                    token_hash,
+                    PrefixCacheEntry {
+                        seq_id,
+                        block_ids,
+                        token_count,
+                    },
                 );
+                debug!(request_id = req_id, token_count, "cached prefix KV state");
                 return true;
             }
         }
@@ -417,7 +431,8 @@ mod tests {
         // Simulate inserting a prefix cache entry manually
         {
             let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-            let mut req = InferenceRequest::new(42, tokens.clone(), 10, SamplingParams::default(), tx);
+            let mut req =
+                InferenceRequest::new(42, tokens.clone(), 10, SamplingParams::default(), tx);
             req.kv_seq_id = 0;
             req.page_table = PageTable::new(vec![0, 1]);
             req.state = RequestState::Finished;
@@ -438,7 +453,10 @@ mod tests {
 
         let batch = sched.schedule_step();
         // The new request should be admitted to prefill
-        assert!(batch.prefill.contains(&99), "request 99 should be in prefill");
+        assert!(
+            batch.prefill.contains(&99),
+            "request 99 should be in prefill"
+        );
         assert_eq!(sched.prefix_hits.load(Ordering::Relaxed), 1);
     }
 

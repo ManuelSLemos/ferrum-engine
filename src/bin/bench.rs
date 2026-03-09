@@ -49,7 +49,10 @@ struct Args {
     requests: usize,
 
     /// Prompt to use for every request.
-    #[arg(long, default_value = "Write a short paragraph about the Rust programming language.")]
+    #[arg(
+        long,
+        default_value = "Write a short paragraph about the Rust programming language."
+    )]
     prompt: String,
 
     /// Maximum tokens to generate per request.
@@ -144,7 +147,12 @@ async fn run_request(
             }
             if let Ok(chunk) = serde_json::from_str::<SseChunk>(data) {
                 for choice in &chunk.choices {
-                    if choice.delta.content.as_deref().is_some_and(|c| !c.is_empty()) {
+                    if choice
+                        .delta
+                        .content
+                        .as_deref()
+                        .is_some_and(|c| !c.is_empty())
+                    {
                         if ttft.is_none() {
                             ttft = Some(start.elapsed());
                         }
@@ -161,7 +169,11 @@ async fn run_request(
     let total = start.elapsed();
     let ttft = ttft.unwrap_or(total);
 
-    Ok(RequestResult { ttft, total, tokens_generated })
+    Ok(RequestResult {
+        ttft,
+        total,
+        tokens_generated,
+    })
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -190,7 +202,10 @@ async fn main() -> Result<()> {
     println!("  Concurrency : {}", args.concurrency);
     println!("  Requests    : {}", args.requests);
     println!("  Max tokens  : {}", args.max_tokens);
-    println!("  Prompt      : \"{}\"", &args.prompt[..args.prompt.len().min(60)]);
+    println!(
+        "  Prompt      : \"{}\"",
+        &args.prompt[..args.prompt.len().min(60)]
+    );
     println!();
 
     let client = Client::builder()

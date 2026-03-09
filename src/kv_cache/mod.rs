@@ -3,8 +3,8 @@
 // Total blocks computed from: gpu_memory_bytes * fraction / bytes_per_block
 // bytes_per_block = block_size × num_layers × num_heads_kv × head_dim × 2 (K+V) × 2 (f16)
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use anyhow::Result;
 use tracing::debug;
@@ -126,9 +126,7 @@ impl KVCacheManager {
 
         debug!(
             total_blocks,
-            block_size,
-            gpu_memory_bytes,
-            "KV cache manager initialized"
+            block_size, gpu_memory_bytes, "KV cache manager initialized"
         );
 
         Self {
@@ -150,9 +148,16 @@ impl KVCacheManager {
 
     /// Allocate n blocks. Returns block IDs with ref_count set to 1.
     pub fn allocate(&self, n: usize) -> Result<Vec<BlockId>> {
-        let mut guard = self.free_list.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {}", e))?;
+        let mut guard = self
+            .free_list
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {}", e))?;
         if guard.len() < n {
-            anyhow::bail!("Insufficient KV cache blocks: need {}, have {}", n, guard.len());
+            anyhow::bail!(
+                "Insufficient KV cache blocks: need {}, have {}",
+                n,
+                guard.len()
+            );
         }
         let mut ids = Vec::with_capacity(n);
         for _ in 0..n {
@@ -185,7 +190,8 @@ impl KVCacheManager {
             }
         }
         if actually_freed > 0 {
-            self.allocated_count.fetch_sub(actually_freed, Ordering::Relaxed);
+            self.allocated_count
+                .fetch_sub(actually_freed, Ordering::Relaxed);
         }
     }
 

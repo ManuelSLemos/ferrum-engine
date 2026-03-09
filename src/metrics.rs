@@ -45,9 +45,7 @@ impl Metrics {
                 "ferrum_request_latency_seconds",
                 "End-to-end request latency in seconds (submit → last token)"
             )
-            .buckets(vec![
-                0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0,
-            ]))?,
+            .buckets(vec![0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0,]))?,
             kv_cache_usage_ratio: register_gauge!(
                 "ferrum_kv_cache_usage_ratio",
                 "KV cache memory usage ratio [0.0, 1.0]"

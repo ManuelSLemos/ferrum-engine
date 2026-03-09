@@ -39,7 +39,11 @@ async fn main() -> Result<()> {
     }
 
     tracing::info!("loading model from {:?}", config.model_path);
-    let model = LlamaCppModel::load(&config.model_path, config.max_batch_size, config.max_context_len)?;
+    let model = LlamaCppModel::load(
+        &config.model_path,
+        config.max_batch_size,
+        config.max_context_len,
+    )?;
     let model_config = model.model_config();
 
     // Derive a human-readable model name from the file stem (e.g. "qwen2-7b-instruct-q4")
@@ -83,17 +87,22 @@ async fn main() -> Result<()> {
     );
     let engine = std::sync::Arc::new(engine);
 
-    let addr: std::net::SocketAddr = format!("{}:{}", config.host, config.port)
-        .parse()
-        .map_err(|e| anyhow::anyhow!("invalid bind address '{}:{}': {}", config.host, config.port, e))?;
+    let addr: std::net::SocketAddr =
+        format!("{}:{}", config.host, config.port)
+            .parse()
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "invalid bind address '{}:{}': {}",
+                    config.host,
+                    config.port,
+                    e
+                )
+            })?;
     let app = router(engine.clone()).layer(tower_http::cors::CorsLayer::permissive());
 
     tracing::info!("listening on {}", addr);
 
-    let server = axum::serve(
-        tokio::net::TcpListener::bind(addr).await?,
-        app,
-    );
+    let server = axum::serve(tokio::net::TcpListener::bind(addr).await?, app);
 
     let engine_loop = {
         let engine = engine.clone();
@@ -130,8 +139,8 @@ async fn shutdown_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
-        let mut sigterm = signal(SignalKind::terminate())
-            .expect("failed to install SIGTERM handler");
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
         tokio::select! {
             _ = ctrl_c => {}
             _ = sigterm.recv() => {}
