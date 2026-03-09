@@ -1,16 +1,26 @@
 // Model trait and LlamaCppModel implementation.
 // Uses llama.cpp FFI for GGUF loading and inference.
 
+#[cfg(not(ferrum_stub))]
 use std::cmp::Ordering;
+#[cfg(not(ferrum_stub))]
 use std::ffi::CString;
+#[cfg(not(ferrum_stub))]
 use std::os::raw::c_char;
+#[cfg(not(ferrum_stub))]
 use std::ptr::NonNull;
+#[cfg(not(ferrum_stub))]
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
-use rand::{Rng, SeedableRng};
+#[cfg(not(ferrum_stub))]
+use anyhow::anyhow;
+use anyhow::Result;
+#[cfg(not(ferrum_stub))]
 use rand::rngs::StdRng;
+#[cfg(not(ferrum_stub))]
+use rand::{Rng, SeedableRng};
 
+#[cfg(not(ferrum_stub))]
 use super::ffi;
 
 /// Model architecture configuration.
@@ -32,7 +42,10 @@ pub struct Logits {
 
 impl Logits {
     pub fn new(values: Vec<f32>, sampled_token: i32) -> Self {
-        Self { values, sampled_token }
+        Self {
+            values,
+            sampled_token,
+        }
     }
 }
 
@@ -111,6 +124,7 @@ pub trait Model: Send + Sync {
 }
 
 /// Sample the highest-probability token (deterministic).
+#[cfg(not(ferrum_stub))]
 fn sample_greedy(logits: &[f32]) -> i32 {
     logits
         .iter()
@@ -121,6 +135,7 @@ fn sample_greedy(logits: &[f32]) -> i32 {
 }
 
 /// Apply repetition penalty in-place: divide positive logits and multiply negative ones.
+#[cfg(not(ferrum_stub))]
 fn apply_repetition_penalty(logits: &mut [f32], token_ids: &[i32], penalty: f32) {
     for &tid in token_ids {
         if tid >= 0 && (tid as usize) < logits.len() {
@@ -131,6 +146,7 @@ fn apply_repetition_penalty(logits: &mut [f32], token_ids: &[i32], penalty: f32)
 }
 
 /// Parameters for the full stochastic sampler.
+#[cfg(not(ferrum_stub))]
 struct SamplerParams<'a> {
     temperature: f32,
     top_p: f32,
@@ -145,6 +161,7 @@ struct SamplerParams<'a> {
 ///
 /// When `temperature` ≤ 0 the function falls back to greedy regardless of other parameters.
 /// The RNG is seeded per-request for reproducibility when `seed` is provided.
+#[cfg(not(ferrum_stub))]
 fn sample_token(logits: &[f32], p: SamplerParams<'_>) -> i32 {
     let SamplerParams {
         temperature,
@@ -240,7 +257,11 @@ pub struct LlamaCppModel {
 #[cfg(not(ferrum_stub))]
 impl LlamaCppModel {
     /// Load a GGUF model from path.
-    pub fn load(model_path: &std::path::Path, max_batch_size: usize, max_context_len: u32) -> Result<Self> {
+    pub fn load(
+        model_path: &std::path::Path,
+        max_batch_size: usize,
+        max_context_len: u32,
+    ) -> Result<Self> {
         unsafe {
             ffi::llama_backend_init();
         }
@@ -251,10 +272,9 @@ impl LlamaCppModel {
         let path_c = CString::new(path_cstr)?;
 
         let model_params = unsafe { ffi::llama_model_default_params() };
-        let model = unsafe {
-            ffi::llama_model_load_from_file(path_c.as_ptr(), model_params)
-        };
-        let model = NonNull::new(model).ok_or_else(|| anyhow!("llama_model_load_from_file failed"))?;
+        let model = unsafe { ffi::llama_model_load_from_file(path_c.as_ptr(), model_params) };
+        let model =
+            NonNull::new(model).ok_or_else(|| anyhow!("llama_model_load_from_file failed"))?;
 
         let vocab = unsafe { ffi::llama_model_get_vocab(model.as_ptr()) };
         if vocab.is_null() {
@@ -284,9 +304,7 @@ impl LlamaCppModel {
         ctx_params.n_batch = max_context_len.max(max_batch_size as u32);
         ctx_params.n_seq_max = 64;
 
-        let ctx = unsafe {
-            ffi::llama_init_from_model(model.as_ptr(), ctx_params)
-        };
+        let ctx = unsafe { ffi::llama_init_from_model(model.as_ptr(), ctx_params) };
         let ctx = NonNull::new(ctx).ok_or_else(|| {
             unsafe { ffi::llama_model_free(model.as_ptr()) };
             anyhow!("llama_init_from_model failed")
@@ -363,7 +381,7 @@ impl LlamaCppModel {
                     token,
                     buf.as_mut_ptr() as *mut c_char,
                     buf.len() as i32,
-                    0,   // lstrip: keep leading spaces so words don't concatenate (e.g. "¡Hola!¿Enquépuedo...")
+                    0, // lstrip: keep leading spaces so words don't concatenate (e.g. "¡Hola!¿Enquépuedo...")
                     true, // special
                 )
             };
@@ -376,7 +394,7 @@ impl LlamaCppModel {
                         token,
                         buf.as_mut_ptr() as *mut c_char,
                         buf.len() as i32,
-                        0,   // lstrip: keep leading spaces
+                        0, // lstrip: keep leading spaces
                         true,
                     )
                 };
@@ -439,21 +457,21 @@ impl LlamaCppModel {
                     std::ffi::CStr::from_ptr(p).to_str().ok().map(|s| s as &str)
                 }
             };
-        if let Some(s) = from_model {
-            vec![Some(s)]
-        } else {
-            vec![None]
-        }
+            if let Some(s) = from_model {
+                vec![Some(s)]
+            } else {
+                vec![None]
+            }
         };
 
         // Built-in template names - llama_chat_apply_template looks them up by name
         let fallback_names = [
-            "chatml",      // Qwen, Phi, OpenHermes, many models
-            "llama3",      // Meta Llama 3
-            "phi3",        // Microsoft Phi-3
-            "llama2",      // Meta Llama 2, Mistral
-            "mistral-v1",  // Mistral
-            "gemma",       // Google Gemma
+            "chatml",     // Qwen, Phi, OpenHermes, many models
+            "llama3",     // Meta Llama 3
+            "phi3",       // Microsoft Phi-3
+            "llama2",     // Meta Llama 2, Mistral
+            "mistral-v1", // Mistral
+            "gemma",      // Google Gemma
         ];
 
         let mut template_strings: Vec<String> = templates_to_try
@@ -528,7 +546,10 @@ impl LlamaCppModel {
         // Copy cached prefix KV data into each request's sequence BEFORE building the batch.
         // This must happen while holding the context lock, so we do it here in the blocking task.
         {
-            let ctx_guard = self._ctx.lock().map_err(|e| anyhow!("lock poisoned: {}", e))?;
+            let ctx_guard = self
+                ._ctx
+                .lock()
+                .map_err(|e| anyhow!("lock poisoned: {}", e))?;
             let ctx = ctx_guard.as_ptr();
             unsafe {
                 let mem = ffi::llama_get_memory(ctx as *const _);
@@ -564,9 +585,7 @@ impl LlamaCppModel {
 
         let n_seq_max = requests.len().max(1) as i32;
 
-        let mut batch = unsafe {
-            ffi::llama_batch_init(total_tokens as i32, 0, n_seq_max)
-        };
+        let mut batch = unsafe { ffi::llama_batch_init(total_tokens as i32, 0, n_seq_max) };
 
         let mut batch_logits_indices: Vec<i32> = Vec::with_capacity(requests.len());
         for req in requests.iter() {
@@ -597,7 +616,10 @@ impl LlamaCppModel {
             }
         }
 
-        let ctx_guard = self._ctx.lock().map_err(|e| anyhow!("lock poisoned: {}", e))?;
+        let ctx_guard = self
+            ._ctx
+            .lock()
+            .map_err(|e| anyhow!("lock poisoned: {}", e))?;
         let ctx = ctx_guard.as_ptr();
 
         let ret = unsafe { ffi::llama_decode(ctx, batch) };
@@ -621,19 +643,21 @@ impl LlamaCppModel {
                 results.push((req_id, Logits::new(vec![], self.eos_token)));
                 continue;
             }
-            let logits_slice: &[f32] = unsafe {
-                std::slice::from_raw_parts(logits_ptr, n_vocab as usize)
-            };
+            let logits_slice: &[f32] =
+                unsafe { std::slice::from_raw_parts(logits_ptr, n_vocab as usize) };
             let sampled = if let Some(r) = req {
-                sample_token(logits_slice, SamplerParams {
-                    temperature: r.temperature,
-                    top_p: r.top_p,
-                    top_k: r.top_k,
-                    repetition_penalty: r.repetition_penalty,
-                    generated_ids: &r.generated_token_ids,
-                    seed: r.seed,
-                    token_count: r.generated_tokens,
-                })
+                sample_token(
+                    logits_slice,
+                    SamplerParams {
+                        temperature: r.temperature,
+                        top_p: r.top_p,
+                        top_k: r.top_k,
+                        repetition_penalty: r.repetition_penalty,
+                        generated_ids: &r.generated_token_ids,
+                        seed: r.seed,
+                        token_count: r.generated_tokens,
+                    },
+                )
             } else {
                 sample_greedy(logits_slice)
             };
@@ -658,10 +682,12 @@ impl LlamaCppModel {
         let mut batch = unsafe { ffi::llama_batch_init(n_tokens, 0, n_tokens) };
 
         for (batch_slot, req) in requests.iter().enumerate() {
-            let input_token = req.last_token.or_else(|| req.prompt_tokens.last().copied())
+            let input_token = req
+                .last_token
+                .or_else(|| req.prompt_tokens.last().copied())
                 .unwrap_or(self.eos_token);
             let pos = req.context_len as i32;
-            let seq_id = req.kv_seq_id;  // stable ID — never the batch slot index
+            let seq_id = req.kv_seq_id; // stable ID — never the batch slot index
 
             unsafe {
                 *batch.token.add(batch_slot) = input_token;
@@ -674,7 +700,10 @@ impl LlamaCppModel {
             batch.n_tokens += 1;
         }
 
-        let ctx_guard = self._ctx.lock().map_err(|e| anyhow!("lock poisoned: {}", e))?;
+        let ctx_guard = self
+            ._ctx
+            .lock()
+            .map_err(|e| anyhow!("lock poisoned: {}", e))?;
         let ctx = ctx_guard.as_ptr();
 
         let ret = unsafe { ffi::llama_decode(ctx, batch) };
@@ -693,19 +722,21 @@ impl LlamaCppModel {
                 results.push((req_id, Logits::new(vec![], self.eos_token)));
                 continue;
             }
-            let logits_slice: &[f32] = unsafe {
-                std::slice::from_raw_parts(logits_ptr, n_vocab as usize)
-            };
+            let logits_slice: &[f32] =
+                unsafe { std::slice::from_raw_parts(logits_ptr, n_vocab as usize) };
             let sampled = if let Some(r) = req {
-                sample_token(logits_slice, SamplerParams {
-                    temperature: r.temperature,
-                    top_p: r.top_p,
-                    top_k: r.top_k,
-                    repetition_penalty: r.repetition_penalty,
-                    generated_ids: &r.generated_token_ids,
-                    seed: r.seed,
-                    token_count: r.generated_tokens,
-                })
+                sample_token(
+                    logits_slice,
+                    SamplerParams {
+                        temperature: r.temperature,
+                        top_p: r.top_p,
+                        top_k: r.top_k,
+                        repetition_penalty: r.repetition_penalty,
+                        generated_ids: &r.generated_token_ids,
+                        seed: r.seed,
+                        token_count: r.generated_tokens,
+                    },
+                )
             } else {
                 sample_greedy(logits_slice)
             };
