@@ -7,14 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.6.0] - 2026-03-09
+## [0.6.0] - 2026-03-10
 
 ### Added
+
+- **CLI visual overhaul — minimalista con color** (`src/cli/theme.rs`, all CLI modules)
+  - New `src/cli/theme.rs` module centralises all ANSI styling. Respects `NO_COLOR` and
+    non-TTY contexts (pipes, CI) — every helper silently falls back to plain text.
+  - New direct dependency: `crossterm = "0.28"`.
+  - **`fox run` loading spinner** — replaces the static `"Loading model… done."` line with a
+    cyan Braille spinner (`indicatif`) that clears itself and prints `  ✓  Model loaded.`
+    (bold green) on success.
+  - **REPL banner** — after load, prints `🦊  <model name>` (bold white), a dim separator
+    and a dim hint line (`/bye o Ctrl+D para salir · N tokens`).
+  - **Prompt glyph** — `  ❯ ` (bold cyan) replaces `"You: "`.
+  - **Thinking spinner** — a dim Braille spinner labelled `"Thinking…"` runs while the model
+    generates; cleared on the first emitted token.
+  - **Role label** — `  Fox  ` (bold yellow) is printed once to stderr immediately before the
+    first token, producing `  Fox  <streamed response>` inline.
+  - **Per-turn timing** — dim `  N tokens · X.Xs` line printed after each assistant turn.
+  - **`fox list`** — table header bold, separator dim, SIZE column blue, MODIFIED dim.
+  - **`fox ps`** — table header bold, separator dim; STATUS `ok` → bold green; KV cache
+    usage colour-coded (green < 50 %, yellow < 80 %, red ≥ 80 %).
+  - **`fox show`** — all key/value rows use `theme::print_kv_pair` (key bold+dim, padded).
+  - **`fox pull`** — post-download success line uses `  ✓  Saved to …` (bold green); hint
+    lines for `fox run` / `fox serve` are dimmed.
+  - **`fox serve`** — prints `  🦊  <model>  ·  listening on <addr>` (green) to stderr when
+    the server is ready.
 
 - **Interactive REPL mode for `fox run`** (`src/cli/run.rs`)
   - Running `fox run --model-path model.gguf` without a prompt now opens a conversational chat session.
   - Full message history is maintained across turns: each new turn sends the complete history through `apply_chat_template`, giving the model proper context.
-  - Session header displays the model name.
   - Exit commands: `/bye`, `/exit`, `exit`, `quit`, or Ctrl+D (EOF).
   - Existing one-shot behavior (`fox run --model-path model.gguf "prompt"`) is fully preserved.
   - The engine loop stays alive across turns; no model reload between messages.

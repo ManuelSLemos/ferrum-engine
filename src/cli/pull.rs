@@ -212,7 +212,7 @@ fn build_client(token: Option<&str>) -> Result<reqwest::Client> {
     }
     reqwest::Client::builder()
         .default_headers(headers)
-        .user_agent("ferrumox/0.4.0")
+        .user_agent("ferrumox/0.6.0")
         .build()
         .context("building HTTP client")
 }
