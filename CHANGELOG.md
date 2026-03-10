@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.0] - 2026-03-09
 
+### Added
+
+- **Interactive REPL mode for `fox run`** (`src/cli/run.rs`)
+  - Running `fox run --model-path model.gguf` without a prompt now opens a conversational chat session.
+  - Full message history is maintained across turns: each new turn sends the complete history through `apply_chat_template`, giving the model proper context.
+  - Session header displays the model name.
+  - Exit commands: `/bye`, `/exit`, `exit`, `quit`, or Ctrl+D (EOF).
+  - Existing one-shot behavior (`fox run --model-path model.gguf "prompt"`) is fully preserved.
+  - The engine loop stays alive across turns; no model reload between messages.
+
 ### Changed
 
 - **Project renamed from `ferrum-engine` to `ferrumox`** — the CLI binary is now `fox`, the benchmark binary is `fox-bench`.

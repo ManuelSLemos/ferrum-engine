@@ -1,14 +1,18 @@
-// `fox run` — single-shot inference, streaming output to stdout.
+// `fox run` — single-shot inference or interactive REPL, streaming output to stdout.
 // Reuses the full engine stack (Scheduler + InferenceEngine) without an HTTP server.
+//
+// fox run --model-path model.gguf "Hello"   → one-shot
+// fox run --model-path model.gguf           → opens interactive REPL
 
 use std::io::Write as _;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
 
-use crate::engine::model::{LlamaCppModel, Model};
 use crate::engine::InferenceEngine;
+use crate::engine::model::{LlamaCppModel, Model};
 use crate::kv_cache::KVCacheManager;
 use crate::scheduler::{InferenceRequest, SamplingParams};
 
@@ -20,10 +24,11 @@ pub struct RunArgs {
     #[arg(long, env = "FOX_MODEL_PATH")]
     pub model_path: PathBuf,
 
-    /// The prompt to send to the model
-    pub prompt: String,
+    /// The prompt to send to the model.
+    /// If omitted, an interactive chat session is started.
+    pub prompt: Option<String>,
 
-    /// Maximum number of tokens to generate
+    /// Maximum number of tokens to generate per turn
     #[arg(long, default_value = "512")]
     pub max_new_tokens: usize,
 
@@ -125,41 +130,35 @@ pub async fn run_run(args: RunArgs) -> Result<()> {
         None,
     ));
 
-    // Build message list and apply chat template.
+    match args.prompt.clone() {
+        Some(prompt) => run_oneshot(&args, &engine, prompt).await,
+        None => run_repl(&args, &engine).await,
+    }
+}
+
+/// One-shot mode: send a single prompt and stream the response to stdout.
+async fn run_oneshot(args: &RunArgs, engine: &Arc<InferenceEngine>, prompt: String) -> Result<()> {
     let mut messages: Vec<(String, String)> = Vec::new();
     if !args.no_system_prompt && !args.system_prompt.is_empty() {
         messages.push(("system".to_string(), args.system_prompt.clone()));
     }
-    messages.push(("user".to_string(), args.prompt.clone()));
+    messages.push(("user".to_string(), prompt));
 
-    let prompt = engine.apply_chat_template(&messages).unwrap_or_else(|_| {
-        messages
-            .iter()
-            .map(|(r, c)| format!("{}: {}", r, c))
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
+    stream_turn(args, engine, &messages).await?;
+    println!();
+    Ok(())
+}
 
-    let prompt_tokens = engine.tokenize(&prompt).unwrap_or_else(|_| {
-        prompt.bytes().map(|b| b as i32).take(4096).collect()
-    });
+/// Interactive REPL mode: maintain conversation history across multiple turns.
+async fn run_repl(args: &RunArgs, engine: &Arc<InferenceEngine>) -> Result<()> {
+    let model_name = engine.model_name();
 
-    let sampling = SamplingParams {
-        temperature: args.temperature,
-        top_p: args.top_p,
-        top_k: args.top_k,
-        repetition_penalty: args.repetition_penalty,
-        seed: args.seed,
-        stop: None,
-        show_thinking: args.show_thinking,
-    };
+    eprintln!();
+    eprintln!("Ferrumox — {}", model_name);
+    eprintln!("Type your message and press Enter. Type /bye or press Ctrl+D to exit.");
+    eprintln!();
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let req_id = engine.next_request_id();
-    let req = InferenceRequest::new(req_id, prompt_tokens, args.max_new_tokens, sampling, tx);
-    engine.submit_request(req);
-
-    // Drive the engine loop in the background.
+    // Keep the engine loop running for the lifetime of the session.
     let engine_loop = {
         let engine = engine.clone();
         tokio::spawn(async move {
@@ -167,7 +166,147 @@ pub async fn run_run(args: RunArgs) -> Result<()> {
         })
     };
 
-    // Stream tokens to stdout.
+    let mut messages: Vec<(String, String)> = Vec::new();
+    if !args.no_system_prompt && !args.system_prompt.is_empty() {
+        messages.push(("system".to_string(), args.system_prompt.clone()));
+    }
+
+    loop {
+        // Print prompt indicator.
+        eprint!("You: ");
+        let _ = std::io::stderr().flush();
+
+        // Read line via spawn_blocking to avoid blocking the tokio runtime thread,
+        // which would starve the engine loop task running concurrently.
+        let result = tokio::task::spawn_blocking(|| {
+            let mut line = String::new();
+            let n = std::io::stdin().read_line(&mut line)?;
+            Ok::<(String, usize), std::io::Error>((line, n))
+        })
+        .await
+        .expect("spawn_blocking panicked");
+
+        let (line, n) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("\nError reading input: {}", e);
+                break;
+            }
+        };
+
+        if n == 0 {
+            // EOF (Ctrl+D)
+            eprintln!();
+            break;
+        }
+
+        let input = line.trim().to_string();
+
+        if input.is_empty() {
+            continue;
+        }
+
+        if input == "/bye" || input == "/exit" || input == "exit" || input == "quit" {
+            eprintln!("Bye!");
+            break;
+        }
+
+        messages.push(("user".to_string(), input));
+
+        eprint!("Assistant: ");
+        let _ = std::io::stderr().flush();
+
+        let response = stream_turn_collecting(args, engine, &messages).await?;
+        println!();
+        eprintln!();
+
+        if response.is_empty() {
+            eprintln!("(Context window full — clearing conversation history.)");
+            eprintln!();
+            messages.truncate(if args.no_system_prompt { 0 } else { 1 });
+        } else {
+            messages.push(("assistant".to_string(), response));
+        }
+    }
+
+    engine_loop.abort();
+    Ok(())
+}
+
+/// Run one inference turn, stream tokens to stdout, and return the full response text.
+async fn stream_turn_collecting(
+    args: &RunArgs,
+    engine: &Arc<InferenceEngine>,
+    messages: &[(String, String)],
+) -> Result<String> {
+    let prompt = engine.apply_chat_template(messages).unwrap_or_else(|_| {
+        messages
+            .iter()
+            .map(|(r, c)| format!("{}: {}", r, c))
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+
+    let prompt_tokens = engine
+        .tokenize(&prompt)
+        .unwrap_or_else(|_| prompt.bytes().map(|b| b as i32).take(4096).collect());
+
+    let sampling = build_sampling_params(args);
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let req_id = engine.next_request_id();
+    let req = InferenceRequest::new(req_id, prompt_tokens, args.max_new_tokens, sampling, tx);
+    engine.submit_request(req);
+
+    let stdout = std::io::stdout();
+    let mut response = String::new();
+    while let Some(token) = rx.recv().await {
+        if !token.text.is_empty() {
+            print!("{}", token.text);
+            let _ = stdout.lock().flush();
+            response.push_str(&token.text);
+        }
+        if token.stop_reason.is_some() {
+            break;
+        }
+    }
+
+    Ok(response)
+}
+
+/// Run one inference turn streaming to stdout (no response collection — for one-shot mode).
+async fn stream_turn(
+    args: &RunArgs,
+    engine: &Arc<InferenceEngine>,
+    messages: &[(String, String)],
+) -> Result<()> {
+    let prompt = engine.apply_chat_template(messages).unwrap_or_else(|_| {
+        messages
+            .iter()
+            .map(|(r, c)| format!("{}: {}", r, c))
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+
+    let prompt_tokens = engine
+        .tokenize(&prompt)
+        .unwrap_or_else(|_| prompt.bytes().map(|b| b as i32).take(4096).collect());
+
+    let sampling = build_sampling_params(args);
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let req_id = engine.next_request_id();
+    let req = InferenceRequest::new(req_id, prompt_tokens, args.max_new_tokens, sampling, tx);
+    engine.submit_request(req);
+
+    // Drive the engine loop in the background for this single request.
+    let engine_loop = {
+        let engine = engine.clone();
+        tokio::spawn(async move {
+            let _ = engine.run_loop().await;
+        })
+    };
+
     let stdout = std::io::stdout();
     while let Some(token) = rx.recv().await {
         if !token.text.is_empty() {
@@ -178,8 +317,19 @@ pub async fn run_run(args: RunArgs) -> Result<()> {
             break;
         }
     }
-    println!(); // trailing newline
 
     engine_loop.abort();
     Ok(())
+}
+
+fn build_sampling_params(args: &RunArgs) -> SamplingParams {
+    SamplingParams {
+        temperature: args.temperature,
+        top_p: args.top_p,
+        top_k: args.top_k,
+        repetition_penalty: args.repetition_penalty,
+        seed: args.seed,
+        stop: None,
+        show_thinking: args.show_thinking,
+    }
 }

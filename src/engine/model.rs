@@ -313,10 +313,15 @@ impl LlamaCppModel {
         };
 
         let mut ctx_params = unsafe { ffi::llama_context_default_params() };
-        ctx_params.n_ctx = max_context_len;
+        // n_seq_max controls how many concurrent sequences the KV cache tracks.
+        // Must be >= max_batch_size for serving, and large enough for prefix-cache
+        // seq_cp operations (needs at least 2 slots). Using max(max_batch_size, 4)
+        // ensures n_ctx_seq = n_ctx / n_seq_max gives reasonable per-seq context.
+        let n_seq = (max_batch_size as u32).max(4);
+        ctx_params.n_ctx = max_context_len * n_seq;
         // n_batch must be at least as large as n_ctx to handle full prompts in one pass
         ctx_params.n_batch = max_context_len.max(max_batch_size as u32);
-        ctx_params.n_seq_max = 64;
+        ctx_params.n_seq_max = n_seq;
 
         let ctx = unsafe { ffi::llama_init_from_model(model.as_ptr(), ctx_params) };
         let ctx = NonNull::new(ctx).ok_or_else(|| {
