@@ -14,7 +14,9 @@ fn main() {
 
     if env::var("FOX_SKIP_LLAMA").is_ok() || !llama_root.exists() {
         if !llama_root.exists() {
-            println!("cargo:warning=llama.cpp not found. Set FOX_SKIP_LLAMA=1 to build with stubs only.");
+            println!(
+                "cargo:warning=llama.cpp not found. Set FOX_SKIP_LLAMA=1 to build with stubs only."
+            );
         }
         // Generate minimal stub bindings (empty but valid module)
         let out = PathBuf::from(env::var("OUT_DIR").unwrap());

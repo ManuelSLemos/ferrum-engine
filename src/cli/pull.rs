@@ -37,7 +37,7 @@ pub struct PullArgs {
 }
 
 pub async fn run_pull(args: PullArgs) -> Result<()> {
-    let output_dir = expand_tilde(&args.output_dir);
+    let output_dir = super::expand_tilde(&args.output_dir);
     std::fs::create_dir_all(&output_dir)
         .with_context(|| format!("creating output dir {:?}", output_dir))?;
 
@@ -60,10 +60,7 @@ pub async fn run_pull(args: PullArgs) -> Result<()> {
         );
     }
 
-    let meta: serde_json::Value = resp
-        .json()
-        .await
-        .context("parsing HF API response")?;
+    let meta: serde_json::Value = resp.json().await.context("parsing HF API response")?;
 
     // 2. Extract .gguf file list from `siblings`.
     let siblings = meta["siblings"]
@@ -93,7 +90,11 @@ pub async fn run_pull(args: PullArgs) -> Result<()> {
                     "File `{}` not found in `{}`. Available GGUF files:\n{}",
                     f,
                     args.model_id,
-                    gguf_files.iter().map(|s| format!("  - {}", s)).collect::<Vec<_>>().join("\n")
+                    gguf_files
+                        .iter()
+                        .map(|s| format!("  - {}", s))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 );
             }
             f
@@ -160,8 +161,8 @@ pub async fn run_pull(args: PullArgs) -> Result<()> {
 
     // Write to a temp file first, rename on success.
     let tmp_dest = dest.with_extension("gguf.part");
-    let mut file = std::fs::File::create(&tmp_dest)
-        .with_context(|| format!("creating {:?}", tmp_dest))?;
+    let mut file =
+        std::fs::File::create(&tmp_dest).with_context(|| format!("creating {:?}", tmp_dest))?;
 
     let mut stream = resp;
     while let Some(chunk) = stream
@@ -169,8 +170,7 @@ pub async fn run_pull(args: PullArgs) -> Result<()> {
         .await
         .context("error reading download stream")?
     {
-        file.write_all(&chunk)
-            .context("error writing to file")?;
+        file.write_all(&chunk).context("error writing to file")?;
         pb.inc(chunk.len() as u64);
     }
     pb.finish_with_message("download complete");
@@ -183,10 +183,7 @@ pub async fn run_pull(args: PullArgs) -> Result<()> {
         "Run with:  fox run --model-path \"{}\" \"Your prompt here\"",
         dest.display()
     );
-    eprintln!(
-        "Serve:     fox serve --model-path \"{}\"",
-        dest.display()
-    );
+    eprintln!("Serve:     fox serve --model-path \"{}\"", dest.display());
 
     Ok(())
 }
@@ -216,16 +213,4 @@ fn select_file_interactive(files: &[String]) -> Result<String> {
         .interact()
         .context("interactive selection")?;
     Ok(files[selection].clone())
-}
-
-/// Expand a leading `~` to the user's home directory.
-fn expand_tilde(path: &std::path::Path) -> PathBuf {
-    let s = path.to_string_lossy();
-    if s.starts_with("~/") || s == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            let rest = s.strip_prefix("~").unwrap_or("");
-            return PathBuf::from(home).join(rest.trim_start_matches('/'));
-        }
-    }
-    path.to_path_buf()
 }

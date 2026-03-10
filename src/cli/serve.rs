@@ -1,6 +1,7 @@
 // `fox serve` — start the OpenAI-compatible HTTP inference server.
 
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clap::Parser;
@@ -134,16 +135,12 @@ pub async fn run_serve(args: ServeArgs) -> Result<()> {
         metrics,
     ));
 
-    let addr: std::net::SocketAddr = format!("{}:{}", args.host, args.port)
-        .parse()
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "invalid bind address '{}:{}': {}",
-                args.host,
-                args.port,
-                e
-            )
-        })?;
+    let addr: std::net::SocketAddr =
+        format!("{}:{}", args.host, args.port)
+            .parse()
+            .map_err(|e| {
+                anyhow::anyhow!("invalid bind address '{}:{}': {}", args.host, args.port, e)
+            })?;
 
     let system_prompt = if args.system_prompt.is_empty() {
         None
@@ -151,7 +148,12 @@ pub async fn run_serve(args: ServeArgs) -> Result<()> {
         Some(args.system_prompt)
     };
 
-    let app = router(engine.clone(), system_prompt)
+    let started_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let app = router(engine.clone(), system_prompt, started_at)
         .layer(tower_http::cors::CorsLayer::permissive());
 
     tracing::info!("listening on {}", addr);

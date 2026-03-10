@@ -11,8 +11,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::Parser;
 
-use crate::engine::InferenceEngine;
 use crate::engine::model::{LlamaCppModel, Model};
+use crate::engine::InferenceEngine;
 use crate::kv_cache::KVCacheManager;
 use crate::scheduler::{InferenceRequest, SamplingParams};
 

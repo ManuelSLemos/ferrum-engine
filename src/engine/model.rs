@@ -663,7 +663,9 @@ impl LlamaCppModel {
             // tokens_in_kv = tokens actually placed in the KV during this prefill call.
             // Used by the engine to set prefilled_tokens on the request so decode positions
             // are always consecutive (fixes the position gap for recurrent/hybrid models).
-            let tokens_in_kv = req.map(|r| r.prompt_tokens.len() - effective_skip(r)).unwrap_or(0);
+            let tokens_in_kv = req
+                .map(|r| r.prompt_tokens.len() - effective_skip(r))
+                .unwrap_or(0);
             let batch_idx = batch_logits_indices.get(i).copied().unwrap_or(-1);
             let logits_ptr = if batch_idx >= 0 {
                 unsafe { ffi::llama_get_logits_ith(ctx, batch_idx) }
@@ -1014,16 +1016,25 @@ mod tests {
     fn rep_penalty_divides_positive_logits() {
         let mut logits = vec![2.0f32, 1.0, -1.0];
         apply_repetition_penalty(&mut logits, &[0], 2.0);
-        assert!((logits[0] - 1.0).abs() < 1e-6, "positive logit should be halved");
+        assert!(
+            (logits[0] - 1.0).abs() < 1e-6,
+            "positive logit should be halved"
+        );
         assert!((logits[1] - 1.0).abs() < 1e-6, "untouched");
-        assert!((logits[2] - (-1.0)).abs() < 1e-6, "untouched negative not in token_ids");
+        assert!(
+            (logits[2] - (-1.0)).abs() < 1e-6,
+            "untouched negative not in token_ids"
+        );
     }
 
     #[test]
     fn rep_penalty_multiplies_negative_logits() {
         let mut logits = vec![-1.0f32, 0.5];
         apply_repetition_penalty(&mut logits, &[0], 2.0);
-        assert!((logits[0] - (-2.0)).abs() < 1e-6, "negative logit multiplied by penalty");
+        assert!(
+            (logits[0] - (-2.0)).abs() < 1e-6,
+            "negative logit multiplied by penalty"
+        );
         assert!((logits[1] - 0.5).abs() < 1e-6, "untouched");
     }
 
@@ -1099,7 +1110,10 @@ mod tests {
             seed: Some(42),
             token_count: 0,
         };
-        assert_eq!(sample_token(&logits, params()), sample_token(&logits, params()));
+        assert_eq!(
+            sample_token(&logits, params()),
+            sample_token(&logits, params())
+        );
     }
 
     #[test]
@@ -1148,7 +1162,10 @@ mod tests {
                     token_count: 0,
                 },
             );
-            assert_eq!(t, 3, "dominant token must always be sampled under top_p=0.5");
+            assert_eq!(
+                t, 3,
+                "dominant token must always be sampled under top_p=0.5"
+            );
         }
     }
 
